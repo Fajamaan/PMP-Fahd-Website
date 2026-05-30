@@ -61,6 +61,10 @@ a.claude{text-decoration:none}
 .tab:hover{border-color:var(--accent)}
 .tab.active{background:linear-gradient(90deg,#26305c,#2f3a6e);color:var(--text);border-color:var(--accent)}
 .tab b{color:var(--accent)}
+.pkgbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.pkgbar label{color:var(--muted);font-size:13px;font-weight:600}
+.pkgbar select{background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;cursor:pointer;max-width:100%}
+.pkgbar select:hover{border-color:var(--accent)}
 .footer-note{color:var(--muted);font-size:12px;text-align:center;margin-top:24px;line-height:1.6}
 .checkbtn{margin-top:12px}
 @media(max-width:560px){.qtext{font-size:16px}.opt{font-size:14px}}
@@ -76,6 +80,10 @@ a.claude{text-decoration:none}
     <button class="tab active" data-set="orig">📘 Original · <b id="cnt-orig">0</b></button>
     <button class="tab" data-set="news">🆕 New set · <b id="cnt-news">0</b></button>
     <button class="tab" data-set="wrong">❌ Wrong · <b id="cnt-wrong">0</b></button>
+  </div>
+  <div id="pkgbar" class="pkgbar">
+    <label for="pkgsel">📦 Package</label>
+    <select id="pkgsel"></select>
   </div>
   <div class="bar">
     <div class="progress"><i id="pbar"></i></div>
@@ -969,8 +977,40 @@ const NEW_RAW = [
 const ORIG = RAW_QUESTIONS.map((q,i)=>({...q, ans: ANSWERS[i], _set:'orig'}));
 const NEWS = (typeof NEW_RAW!=='undefined'?NEW_RAW:[]).map(q=>({...q, _set:'new'}));
 const SETS = { orig:{list:ORIG}, news:{list:NEWS}, wrong:{list:[]} };
-const view = { orig:{idx:0,state:{}}, news:{idx:0,state:{}}, wrong:{idx:0,state:{}} };
+const view = { orig:{idx:0,state:{},pkg:0}, news:{idx:0,state:{},pkg:0}, wrong:{idx:0,state:{}} };
 let cur = 'orig';
+
+// --- Study packages: split each bank into chunks of PKG questions ---
+const BANKS = { orig:ORIG, news:NEWS };
+const PKG = 45;
+const clamp = (v,lo,hi)=> v<lo?lo : (v>hi?hi:v);
+function pkgCount(set){ return Math.max(1, Math.ceil(BANKS[set].length / PKG)); }
+function applyPackage(set){
+  const p = clamp(view[set].pkg||0, 0, pkgCount(set)-1);
+  view[set].pkg = p;
+  SETS[set].list = BANKS[set].slice(p*PKG, p*PKG+PKG);   // slice keeps the same question object refs
+}
+function buildPkgSelector(){
+  const bar = $('#pkgbar'), sel = $('#pkgsel');
+  if(cur==='wrong'){ if(bar) bar.style.display='none'; return; }   // Wrong tab isn't packaged
+  if(bar) bar.style.display='flex';
+  const n = pkgCount(cur), full = BANKS[cur].length;
+  sel.innerHTML='';
+  for(let i=0;i<n;i++){
+    const a=i*PKG+1, b=Math.min((i+1)*PKG, full);
+    const o=document.createElement('option');
+    o.value=i; o.textContent='Package '+(i+1)+' of '+n+' · Q'+a+'–'+b+' ('+(b-a+1)+')';
+    sel.appendChild(o);
+  }
+  sel.value = String(view[cur].pkg||0);
+}
+
+// --- Remember the last set / package / position across sessions ---
+function saveLast(){
+  try{ localStorage.setItem('pmpLastV1', JSON.stringify({
+    cur, pkg:{orig:view.orig.pkg, news:view.news.pkg}, idx:{orig:view.orig.idx, news:view.news.idx}
+  })); }catch(e){}
+}
 
 // --- Wrong-answer review: accumulates across sessions via localStorage ---
 const ALL = ORIG.concat(NEWS);
@@ -1176,8 +1216,9 @@ document.querySelectorAll('.tab').forEach(t=>{
   t.addEventListener('click',()=>{
     cur = t.dataset.set;
     if(cur==='wrong'){ rebuildWrong(); view.wrong = {idx:0,state:{}}; }   // fresh retake of the current wrong list
+    else { applyPackage(cur); }
     document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x===t));
-    render();
+    buildPkgSelector(); saveLast(); render();
   });
 });
 $('#cnt-orig').textContent = ORIG.length;
@@ -1192,11 +1233,16 @@ $('#clearwrong').onclick=()=>{
   }
 };
 
-$('#prev').onclick=()=>{ const V=view[cur]; if(V.idx>0){V.idx--;render();} };
-$('#next').onclick=()=>{ const V=view[cur]; if(V.idx<SETS[cur].list.length-1){V.idx++;render();} };
+$('#pkgsel').addEventListener('change',()=>{
+  view[cur].pkg = parseInt($('#pkgsel').value,10)||0;
+  view[cur].idx = 0; view[cur].state = {};     // fresh start within the chosen package
+  applyPackage(cur); saveLast(); render();
+});
+$('#prev').onclick=()=>{ const V=view[cur]; if(V.idx>0){V.idx--;saveLast();render();} };
+$('#next').onclick=()=>{ const V=view[cur]; if(V.idx<SETS[cur].list.length-1){V.idx++;saveLast();render();} };
 $('#jumpbtn').onclick=()=>{
   const N=SETS[cur].list.length; let v=parseInt($('#jumpin').value,10);
-  if(v>=1&&v<=N){view[cur].idx=v-1;render();}
+  if(v>=1&&v<=N){view[cur].idx=v-1;saveLast();render();}
 };
 $('#jumpin').addEventListener('keydown',e=>{ if(e.key==='Enter')$('#jumpbtn').click(); });
 document.addEventListener('keydown',e=>{
@@ -1205,6 +1251,25 @@ document.addEventListener('keydown',e=>{
   if(e.key==='ArrowLeft')$('#prev').click();
 });
 
+// --- Initialize packages, then restore the last session ---
+applyPackage('orig'); applyPackage('news');
+(function restoreLast(){
+  let last=null; try{ last = JSON.parse(localStorage.getItem('pmpLastV1')||'null'); }catch(e){}
+  if(!last) return;
+  if(last.pkg){
+    view.orig.pkg = clamp(last.pkg.orig|0, 0, pkgCount('orig')-1);
+    view.news.pkg = clamp(last.pkg.news|0, 0, pkgCount('news')-1);
+    applyPackage('orig'); applyPackage('news');
+  }
+  if(['orig','news','wrong'].indexOf(last.cur)>=0) cur = last.cur;
+  if(last.idx){
+    view.orig.idx = clamp(last.idx.orig|0, 0, SETS.orig.list.length-1);
+    view.news.idx = clamp(last.idx.news|0, 0, SETS.news.list.length-1);
+  }
+})();
+if(cur==='wrong'){ rebuildWrong(); view.wrong={idx:0,state:{}}; }
+document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.set===cur));
+buildPkgSelector();
 render();
 </script>
 </body>
