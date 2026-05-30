@@ -4,6 +4,7 @@ import os
 
 BUILD = r'C:\Users\Fajam\MyClaude\build'
 OUT = r'C:\Users\Fajam\MyClaude\PMP-Quiz'
+REPO_ROOT = r'C:\Users\Fajam\MyClaude'  # also emit a root index.html for web hosting (Hostinger, etc.)
 
 # Answer key, in order Q1..Q228 (matches questions_dump.txt numbering).
 # Each entry: (correct_letters, short_explanation)
@@ -607,7 +608,8 @@ html = (HTML.replace('__QDATA__', qjs)
             .replace('__N__', str(len(ANSWERS))))
 
 os.makedirs(OUT, exist_ok=True)
-with open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8') as f:
-    f.write(html)
-print('wrote', os.path.join(OUT, 'index.html'))
+for target in (os.path.join(OUT, 'index.html'), os.path.join(REPO_ROOT, 'index.html')):
+    with open(target, 'w', encoding='utf-8') as f:
+        f.write(html)
+    print('wrote', target)
 print('questions in data:', qjs.count('{slide:'))
