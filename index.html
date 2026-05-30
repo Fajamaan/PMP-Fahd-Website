@@ -1295,20 +1295,24 @@ document.addEventListener('keydown',e=>{
 });
 
 // --- Initialize packages, then restore the last session ---
-applyPackage('orig'); applyPackage('news');
+// On reopen, skip questions already answered and land on the first one not yet done.
+function resumeIdx(set){
+  const lst = SETS[set].list;
+  for(let i=0;i<lst.length;i++){ if(!results[qSig(lst[i])]) return i; }
+  return Math.max(0, lst.length-1);   // whole package already answered -> last question (completion banner shows)
+}
 (function restoreLast(){
   let last=null; try{ last = JSON.parse(localStorage.getItem('pmpLastV1')||'null'); }catch(e){}
-  if(!last) return;
-  if(last.pkg){
-    view.orig.pkg = clamp(last.pkg.orig|0, 0, pkgCount('orig')-1);
-    view.news.pkg = clamp(last.pkg.news|0, 0, pkgCount('news')-1);
-    applyPackage('orig'); applyPackage('news');
+  if(last){
+    if(last.pkg){
+      view.orig.pkg = clamp(last.pkg.orig|0, 0, pkgCount('orig')-1);
+      view.news.pkg = clamp(last.pkg.news|0, 0, pkgCount('news')-1);
+    }
+    if(['orig','news','wrong'].indexOf(last.cur)>=0) cur = last.cur;
   }
-  if(['orig','news','wrong'].indexOf(last.cur)>=0) cur = last.cur;
-  if(last.idx){
-    view.orig.idx = clamp(last.idx.orig|0, 0, SETS.orig.list.length-1);
-    view.news.idx = clamp(last.idx.news|0, 0, SETS.news.list.length-1);
-  }
+  applyPackage('orig'); applyPackage('news');
+  view.orig.idx = resumeIdx('orig');   // resume where you stopped, past answered questions
+  view.news.idx = resumeIdx('news');
 })();
 if(cur==='wrong'){ rebuildWrong(); view.wrong={idx:0,state:{}}; }
 document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.set===cur));
