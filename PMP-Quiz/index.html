@@ -65,6 +65,9 @@ a.claude{text-decoration:none}
 .pkgbar label{color:var(--muted);font-size:13px;font-weight:600}
 .pkgbar select{background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;cursor:pointer;max-width:100%}
 .pkgbar select:hover{border-color:var(--accent)}
+.pkgdone{margin:0 0 14px;padding:12px 14px;border-radius:12px;border:1px solid var(--green);background:var(--greenbg);color:#dfffe8;font-size:14px;align-items:center;gap:12px;flex-wrap:wrap}
+.pkgdone b{color:#fff}
+.pkgdone .grow{flex:1;min-width:200px}
 .footer-note{color:var(--muted);font-size:12px;text-align:center;margin-top:24px;line-height:1.6}
 .checkbtn{margin-top:12px}
 @media(max-width:560px){.qtext{font-size:16px}.opt{font-size:14px}}
@@ -92,6 +95,7 @@ a.claude{text-decoration:none}
     <span class="pill jump">Go to <input id="jumpin" type="number" min="1"> <button class="btn ghost" id="jumpbtn" style="padding:6px 10px">Go</button></span>
   </div>
 
+  <div id="pkgdone" class="pkgdone" style="display:none"></div>
   <div id="wrongctl" style="display:none;margin:0 0 12px;text-align:right">
     <button class="btn ghost" id="clearwrong" style="padding:6px 12px;font-size:13px">🗑 Clear wrong-answer list</button>
   </div>
@@ -999,7 +1003,9 @@ function buildPkgSelector(){
   for(let i=0;i<n;i++){
     const a=i*PKG+1, b=Math.min((i+1)*PKG, full);
     const o=document.createElement('option');
-    o.value=i; o.textContent='Package '+(i+1)+' of '+n+' · Q'+a+'–'+b+' ('+(b-a+1)+')';
+    const size=b-a+1, done=pkgAnswered(cur,i);
+    const tag = done>=size ? ' ✓ done' : (done>0 ? ' · '+done+'/'+size : '');
+    o.value=i; o.textContent='Package '+(i+1)+' of '+n+' · Q'+a+'–'+b+tag;
     sel.appendChild(o);
   }
   sel.value = String(view[cur].pkg||0);
@@ -1028,6 +1034,16 @@ function markResult(q,isCorrect){
   else if(!wrongKeys.has(k)){ wrongKeys.add(k); saveWrong(); updateCounts(); }
 }
 function updateCounts(){ const e=$('#cnt-wrong'); if(e) e.textContent = wrongKeys.size; }
+
+// --- Persistent per-question results: powers resume, package completion + ✓ markers ---
+let results;
+try{ results = JSON.parse(localStorage.getItem('pmpResV1')||'{}') || {}; }catch(e){ results = {}; }
+function saveResults(){ try{ localStorage.setItem('pmpResV1', JSON.stringify(results)); }catch(e){} }
+function pkgAnswered(set, i){
+  const a=i*PKG, b=Math.min((i+1)*PKG, BANKS[set].length);
+  let c=0; for(let j=a;j<b;j++){ if(results[qSig(BANKS[set][j])]) c++; }
+  return c;
+}
 
 const $ = s=>document.querySelector(s);
 const card = $('#card');
@@ -1098,7 +1114,11 @@ function render(){
   const L = letters(q.opts.length);
   const multi = q.ans.c.length > 1;
   const rtl = q.lang==='ar';
-  const st = state[idx] || (state[idx] = {picked:new Set(), done:false, correct:false});
+  const sig = qSig(q);
+  const saved = results[sig];
+  const st = saved
+    ? {picked:new Set(saved.p), done:true, correct:saved.c}
+    : (state[idx] || (state[idx] = {picked:new Set(), done:false, correct:false}));
 
   let optsHtml = q.opts.map((o,i)=>{
     const ltr = L[i];
@@ -1183,7 +1203,11 @@ function render(){
     const pickedArr = [...st.picked].sort();
     const correctArr = [...q.ans.c].sort();
     st.correct = pickedArr.length===correctArr.length && pickedArr.every((v,i)=>v===correctArr[i]);
+    results[sig] = {c:st.correct, p:pickedArr};
+    saveResults();
     markResult(q, st.correct);
+    saveLast();
+    buildPkgSelector();   // refresh ✓ / progress in the dropdown
     render();
   }
   function wireClaude(){
@@ -1206,9 +1230,28 @@ function updateBar(){
   $('#prev').disabled = N===0 || V.idx===0;
   $('#next').disabled = N===0 || V.idx>=N-1;
   let s=0,a=0;
-  for(const k in V.state){ if(V.state[k].done){a++; if(V.state[k].correct)s++;} }
+  for(const qq of S.list){ const rr=results[qSig(qq)]; if(rr){a++; if(rr.c)s++;} }
   $('#score').textContent=s; $('#answered').textContent=a;
   const wc=$('#wrongctl'); if(wc) wc.style.display = (cur==='wrong' && wrongKeys.size) ? 'block':'none';
+  renderPkgBanner(N, s, a);
+}
+
+function renderPkgBanner(N, s, a){
+  const el=$('#pkgdone'); if(!el) return;
+  if(cur==='wrong' || N===0 || a<N){ el.style.display='none'; return; }   // only when the whole package is answered
+  const pct=Math.round(s/N*100), p=view[cur].pkg, hasNext = p < pkgCount(cur)-1;
+  el.innerHTML = '<span class="grow">🎉 <b>Package '+(p+1)+' complete!</b> You scored <b>'+s+' / '+N+'</b> correct ('+pct+'%).</span>'
+    + '<button class="btn ghost" id="retakepkg" style="padding:7px 12px;font-size:13px">↻ Retake</button>'
+    + (hasNext ? '<button class="btn" id="nextpkg" style="padding:7px 12px;font-size:13px">Next package →</button>' : '');
+  el.style.display='flex';
+  const rt=$('#retakepkg'); if(rt) rt.onclick=()=>{
+    for(const qq of SETS[cur].list){ delete results[qSig(qq)]; }
+    saveResults(); view[cur].idx=0; view[cur].state={}; buildPkgSelector(); render();
+  };
+  const np=$('#nextpkg'); if(np) np.onclick=()=>{
+    view[cur].pkg += 1; view[cur].idx=0; view[cur].state={};
+    applyPackage(cur); saveLast(); buildPkgSelector(); render();
+  };
 }
 
 // Tab switching
