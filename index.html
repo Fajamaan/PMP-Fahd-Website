@@ -69,12 +69,13 @@ a.claude{text-decoration:none}
 <body>
 <header>
   <h1>📘 Pass Your PMP — Practice Quiz</h1>
-  <span class="sub">Two question banks · pick an answer to see the correct one + an explanation</span>
+  <span class="sub">Answer to reveal the correct one + explanation; questions you miss collect in ❌ Wrong for a focused retake</span>
 </header>
 <div class="wrap">
   <div class="tabs">
-    <button class="tab active" data-set="orig">📘 Original deck · <b id="cnt-orig">0</b></button>
+    <button class="tab active" data-set="orig">📘 Original · <b id="cnt-orig">0</b></button>
     <button class="tab" data-set="news">🆕 New set · <b id="cnt-news">0</b></button>
+    <button class="tab" data-set="wrong">❌ Wrong · <b id="cnt-wrong">0</b></button>
   </div>
   <div class="bar">
     <div class="progress"><i id="pbar"></i></div>
@@ -83,6 +84,9 @@ a.claude{text-decoration:none}
     <span class="pill jump">Go to <input id="jumpin" type="number" min="1"> <button class="btn ghost" id="jumpbtn" style="padding:6px 10px">Go</button></span>
   </div>
 
+  <div id="wrongctl" style="display:none;margin:0 0 12px;text-align:right">
+    <button class="btn ghost" id="clearwrong" style="padding:6px 12px;font-size:13px">🗑 Clear wrong-answer list</button>
+  </div>
   <div class="card" id="card"></div>
 
   <div class="nav">
@@ -964,9 +968,26 @@ const NEW_RAW = [
 // Two banks: the original slide deck, and the new set from the 4 image docs.
 const ORIG = RAW_QUESTIONS.map((q,i)=>({...q, ans: ANSWERS[i], _set:'orig'}));
 const NEWS = (typeof NEW_RAW!=='undefined'?NEW_RAW:[]).map(q=>({...q, _set:'new'}));
-const SETS = { orig:{list:ORIG}, news:{list:NEWS} };
-const view = { orig:{idx:0,state:{}}, news:{idx:0,state:{}} };
+const SETS = { orig:{list:ORIG}, news:{list:NEWS}, wrong:{list:[]} };
+const view = { orig:{idx:0,state:{}}, news:{idx:0,state:{}}, wrong:{idx:0,state:{}} };
 let cur = 'orig';
+
+// --- Wrong-answer review: accumulates across sessions via localStorage ---
+const ALL = ORIG.concat(NEWS);
+function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))|0;}return h;}
+function qSig(q){return q._set+'#'+(q._set==='orig'?('s'+q.slide):(q.src+'|'+q.n))+'#'+hashStr(q.q);}
+let wrongKeys;
+try{ wrongKeys = new Set(JSON.parse(localStorage.getItem('pmpWrongV1')||'[]')); }catch(e){ wrongKeys = new Set(); }
+const _allSigs = new Set(ALL.map(qSig));
+wrongKeys = new Set([...wrongKeys].filter(k=>_allSigs.has(k)));   // drop stale keys from older builds
+function saveWrong(){ try{ localStorage.setItem('pmpWrongV1', JSON.stringify([...wrongKeys])); }catch(e){} }
+function rebuildWrong(){ SETS.wrong.list = ALL.filter(q=>wrongKeys.has(qSig(q))); }
+function markResult(q,isCorrect){
+  const k=qSig(q);
+  if(isCorrect){ if(wrongKeys.has(k)){ wrongKeys.delete(k); saveWrong(); updateCounts(); } }
+  else if(!wrongKeys.has(k)){ wrongKeys.add(k); saveWrong(); updateCounts(); }
+}
+function updateCounts(){ const e=$('#cnt-wrong'); if(e) e.textContent = wrongKeys.size; }
 
 const $ = s=>document.querySelector(s);
 const card = $('#card');
@@ -1024,8 +1045,11 @@ function render(){
   const S = SETS[cur], V = view[cur];
   const list = S.list, state = V.state, N = list.length;
   if(N===0){
-    card.innerHTML = `<p class="qtext">No questions in this set yet.</p>
-      <p class="hint">This bank is still being added. Switch to the other tab above.</p>`;
+    card.innerHTML = (cur==='wrong')
+      ? `<p class="qtext">No wrong answers saved yet 🎉</p>
+         <p class="hint">Answer questions in the 📘 Original or 🆕 New set tabs. Any you miss collect here so you can retake just those — and getting one right here removes it from the list.</p>`
+      : `<p class="qtext">No questions in this set yet.</p>
+         <p class="hint">This bank is still being added. Switch to the other tab above.</p>`;
     updateBar(); return;
   }
   if(V.idx>=N) V.idx = N-1;
@@ -1061,10 +1085,11 @@ function render(){
       : `<span class="no">✗ Not quite.</span> Correct answer: <b>${correctStr}</b>`;
   }
 
-  const metaLeft = (cur==='orig')
+  const fromOrig = q._set==='orig';
+  const metaLeft = fromOrig
     ? `Question ${idx+1} of ${N} &nbsp;·&nbsp; <span class="badge">slide ${q.slide}</span>`
     : `Question ${idx+1} of ${N} &nbsp;·&nbsp; <span class="badge">${q.src} · #${q.n}</span>`;
-  const metaRight = (cur==='orig' && q.aq)
+  const metaRight = (fromOrig && q.aq)
     ? `<span class="toggle" id="artog">🌐 العربية</span>` : '';
 
   card.innerHTML = `
@@ -1083,7 +1108,7 @@ function render(){
         <a class="btn gold" id="claudelink" href="#" target="_blank" rel="noopener">✨ Analyze with Claude</a>
       </div>
     </div>
-    ${(cur==='orig' && q.aq) ? `<div class="ar" id="arbox">
+    ${(fromOrig && q.aq) ? `<div class="ar" id="arbox">
         <div><b>${q.aq}</b></div>
         ${(q.aopts||[]).map((o,i)=>`<div class="aopt">${L[i]}) ${o}</div>`).join('')}
       </div>`:''}
@@ -1118,6 +1143,7 @@ function render(){
     const pickedArr = [...st.picked].sort();
     const correctArr = [...q.ans.c].sort();
     st.correct = pickedArr.length===correctArr.length && pickedArr.every((v,i)=>v===correctArr[i]);
+    markResult(q, st.correct);
     render();
   }
   function wireClaude(){
@@ -1142,18 +1168,29 @@ function updateBar(){
   let s=0,a=0;
   for(const k in V.state){ if(V.state[k].done){a++; if(V.state[k].correct)s++;} }
   $('#score').textContent=s; $('#answered').textContent=a;
+  const wc=$('#wrongctl'); if(wc) wc.style.display = (cur==='wrong' && wrongKeys.size) ? 'block':'none';
 }
 
 // Tab switching
 document.querySelectorAll('.tab').forEach(t=>{
   t.addEventListener('click',()=>{
     cur = t.dataset.set;
+    if(cur==='wrong'){ rebuildWrong(); view.wrong = {idx:0,state:{}}; }   // fresh retake of the current wrong list
     document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x===t));
     render();
   });
 });
 $('#cnt-orig').textContent = ORIG.length;
 $('#cnt-news').textContent = NEWS.length;
+updateCounts();
+
+$('#clearwrong').onclick=()=>{
+  if(!wrongKeys.size) return;
+  if(confirm('Clear all '+wrongKeys.size+' saved wrong answers? This cannot be undone.')){
+    wrongKeys.clear(); saveWrong(); updateCounts(); rebuildWrong();
+    view.wrong = {idx:0,state:{}}; render();
+  }
+};
 
 $('#prev').onclick=()=>{ const V=view[cur]; if(V.idx>0){V.idx--;render();} };
 $('#next').onclick=()=>{ const V=view[cur]; if(V.idx<SETS[cur].list.length-1){V.idx++;render();} };
