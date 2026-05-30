@@ -1,0 +1,23 @@
+# --- Heavy / copyright-sensitive source extraction (regenerable from the .docx/.pptx) ---
+build/docx_extract/
+build/extract/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# --- Runtime / tooling artifacts ---
+*.lock
+.claude/scheduled_tasks.lock
+
+# --- OS noise ---
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- Editor noise ---
+.vscode/
+*.swp
