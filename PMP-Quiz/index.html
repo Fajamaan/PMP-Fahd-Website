@@ -70,7 +70,8 @@ a.claude{text-decoration:none}
 .pkgdone .grow{flex:1;min-width:200px}
 .footer-note{color:var(--muted);font-size:12px;text-align:center;margin-top:24px;line-height:1.6}
 .checkbtn{margin-top:12px}
-.utilbar{display:flex;justify-content:flex-end;margin:0 0 10px}
+.utilbar{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px;flex-wrap:wrap}
+.badge2{background:#2a325f;color:#ffd166;border-radius:999px;padding:1px 8px;font-size:12px;margin-left:4px}
 .toggle.bkmk.on{color:#ffd166}
 .custominfo{margin:0 0 12px;padding:10px 14px;border-radius:12px;border:1px solid var(--accent);background:#1a2150;color:#dfe4ff;font-size:13.5px;align-items:center;gap:12px;flex-wrap:wrap}
 .custominfo .grow{flex:1;min-width:160px}
@@ -103,7 +104,10 @@ a.claude{text-decoration:none}
 </header>
 <div class="wrap">
   <div id="quizscreen">
-  <div class="utilbar"><button id="overviewbtn" class="btn ghost">📋 Question list / overview</button></div>
+  <div class="utilbar">
+    <button id="studybkmk" class="btn ghost">🔖 Study bookmarks</button>
+    <button id="overviewbtn" class="btn ghost">📋 List <span id="bkmkbadge" class="badge2">🔖 0</span></button>
+  </div>
   <div class="tabs">
     <button class="tab active" data-set="orig">📘 Original · <b id="cnt-orig">0</b></button>
     <button class="tab" data-set="news">🆕 New set · <b id="cnt-news">0</b></button>
@@ -1235,7 +1239,7 @@ function render(){
   });
 
   const bkmktog = document.getElementById('bkmktog');
-  if(bkmktog) bkmktog.addEventListener('click',()=>{ toggleBookmark(q); render(); });
+  if(bkmktog) bkmktog.addEventListener('click',()=>{ toggleBookmark(q); updateBookmarkUI(); render(); });
 
   if(st.done) wireClaude();
 
@@ -1404,7 +1408,7 @@ function renderOverview(){
   scr.querySelectorAll('.ov-banktabs button').forEach(b=> b.onclick=()=>{ ovBank=b.dataset.b; renderOverview(); });
   scr.querySelectorAll('.chip').forEach(c=> c.onclick=()=>{ ovFilter=c.dataset.f; renderOverview(); });
   scr.querySelectorAll('.ov-row').forEach(r=> r.onclick=()=> jumpToGlobal(ovBank, parseInt(r.dataset.gi,10)) );
-  const sc=$('#startcustom'); if(sc) sc.onclick=()=> startCustomSet(rows.map(gi=>list[gi]));
+  const sc=$('#startcustom'); if(sc) sc.onclick=()=> startCustomSet(rows.map(gi=>list[gi]), (ovBank==='orig'?'Original':'New set')+' · '+(FLABEL[ovFilter]||ovFilter));
 }
 function jumpToGlobal(bank, gi){
   cur=bank;
@@ -1414,16 +1418,27 @@ function jumpToGlobal(bank, gi){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.set===bank));
   buildPkgSelector(); saveLast(); showQuiz(); render();
 }
-function startCustomSet(qs){
+function startCustomSet(qs, label){
   if(!qs.length) return;
   SETS.custom.list = qs.slice();
   view.custom = {idx:0,state:{}};
   cur='custom';
-  customLabel = (ovBank==='orig'?'Original':'New set')+' · '+(FLABEL[ovFilter]||ovFilter);
+  customLabel = label || 'custom selection';
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   buildPkgSelector(); showQuiz(); render();
 }
+function studyBookmarks(){
+  const qs = ALL.filter(q=>isBookmarked(q));
+  if(!qs.length){ alert('No bookmarked questions yet.\nTap “🔖 Save” on any question to add it here.'); return; }
+  startCustomSet(qs, 'your bookmarks');
+}
+function updateBookmarkUI(){
+  const b=$('#bkmkbadge'); if(b) b.textContent='🔖 '+bookmarks.size;
+  const sb=$('#studybkmk'); if(sb){ sb.style.opacity = bookmarks.size? '1':'0.5'; sb.title = bookmarks.size? ('Start a set of your '+bookmarks.size+' bookmarked question'+(bookmarks.size===1?'':'s')) : 'No bookmarks yet'; }
+}
 $('#overviewbtn').onclick = showOverview;
+$('#studybkmk').onclick = studyBookmarks;
+updateBookmarkUI();
 
 // --- Initialize packages, then restore the last session ---
 // On reopen, skip questions already answered and land on the first one not yet done.
